@@ -31,6 +31,7 @@ describe('useTraceDefaultsOnMount', () => {
         flattenNested: expect.anything(),
         traceEventsColumnPrefix: expect.anything(),
         traceLinksColumnPrefix: expect.anything(),
+        traceTimestampTableSuffix: expect.anything(),
       },
     };
 
