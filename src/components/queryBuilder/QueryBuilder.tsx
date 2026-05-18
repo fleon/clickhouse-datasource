@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Datasource } from 'data/CHDatasource';
-import { Filter, OrderBy, QueryType, QueryBuilderOptions, ColumnHint, StringFilter } from 'types/queryBuilder';
+import {
+  Filter,
+  OrderBy,
+  QueryType,
+  QueryBuilderOptions,
+  ColumnHint,
+  StringFilter,
+  TableColumn,
+} from 'types/queryBuilder';
 import { CoreApp } from '@grafana/data';
 import { LogsQueryBuilder } from './views/LogsQueryBuilder';
 import { TimeSeriesQueryBuilder } from './views/TimeSeriesQueryBuilder';
@@ -36,10 +44,11 @@ interface QueryBuilderProps {
   datasource: Datasource;
   generatedSql: string;
   onQueryChange?: (builderOptions: QueryBuilderOptions) => void;
+  onEditAsSql?: (builderOptions: QueryBuilderOptions) => void;
 }
 
 export const QueryBuilder = (props: QueryBuilderProps) => {
-  const { datasource, builderOptions, builderOptionsDispatch, generatedSql, onQueryChange } = props;
+  const { datasource, builderOptions, builderOptionsDispatch, generatedSql, onQueryChange, onEditAsSql } = props;
   const signalType = datasource.getSignalType();
   const singleTableMode = datasource.isSingleTableMode();
 
@@ -66,6 +75,7 @@ export const QueryBuilder = (props: QueryBuilderProps) => {
         generatedSql={generatedSql}
         signalType={signalType}
         onQueryChange={onQueryChange}
+        onEditAsSql={onEditAsSql}
       />
     );
   }
@@ -119,6 +129,19 @@ export const QueryBuilder = (props: QueryBuilderProps) => {
   );
 };
 
+export const getCompactFilterColumns = (
+  allColumns: readonly TableColumn[],
+  builderOptions: QueryBuilderOptions
+): readonly TableColumn[] => {
+  const timeColumnNames = new Set(
+    (builderOptions.columns || [])
+      .filter((column) => column.hint === ColumnHint.Time || column.hint === ColumnHint.FilterTime)
+      .map((column) => column.name)
+  );
+
+  return allColumns.filter((column) => !timeColumnNames.has(column.name));
+};
+
 interface CompactQueryEditorProps {
   datasource: Datasource;
   builderOptions: QueryBuilderOptions;
@@ -126,10 +149,12 @@ interface CompactQueryEditorProps {
   generatedSql: string;
   signalType: SignalType;
   onQueryChange?: (builderOptions: QueryBuilderOptions) => void;
+  onEditAsSql?: (builderOptions: QueryBuilderOptions) => void;
 }
 
 const CompactQueryEditor = (props: CompactQueryEditorProps) => {
-  const { datasource, builderOptions, builderOptionsDispatch, generatedSql, signalType, onQueryChange } = props;
+  const { datasource, builderOptions, builderOptionsDispatch, generatedSql, signalType, onQueryChange, onEditAsSql } =
+    props;
   const needsInitialization = isDefaultOrMismatchedCompactQuery(builderOptions, signalType);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const lastInitializationKey = useRef<string>();
@@ -159,6 +184,7 @@ const CompactQueryEditor = (props: CompactQueryEditorProps) => {
     ? buildCompactQueryDefaults(datasource, signalType, builderOptions.table)
     : builderOptions;
   const allColumns = useColumns(datasource, activeOptions.database, activeOptions.table);
+  const filterColumns = useMemo(() => getCompactFilterColumns(allColumns, activeOptions), [allColumns, activeOptions]);
 
   const onActiveOptionsChange = (nextOptions: QueryBuilderOptions) => {
     builderOptionsDispatch(setAllOptions(nextOptions));
@@ -192,7 +218,7 @@ const CompactQueryEditor = (props: CompactQueryEditorProps) => {
         database={activeOptions.database}
         table={activeOptions.table}
         filters={activeOptions.filters || []}
-        allColumns={allColumns}
+        allColumns={filterColumns}
         onFiltersChange={(filters: Filter[]) => mergeActiveOptions({ filters })}
         onToggleAdvanced={() => setAdvancedOpen(!advancedOpen)}
         advancedOpen={advancedOpen}
@@ -206,7 +232,7 @@ const CompactQueryEditor = (props: CompactQueryEditorProps) => {
         />
       )}
 
-      <SqlPreview sql={generatedSql} />
+      <SqlPreview sql={generatedSql} compact onEditAsSql={() => onEditAsSql?.(activeOptions)} />
     </div>
   );
 };

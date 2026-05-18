@@ -150,6 +150,31 @@ const CHEditorByType = (props: CHQueryEditorProps) => {
     [onChange, query]
   );
 
+  const onEditAsSql = useCallback(
+    (newOptions: QueryBuilderOptions) => {
+      const {
+        builderOptions: discardedBuilderOptions,
+        queryType: discardedQueryType,
+        ...baseQuery
+      } = query as CHBuilderQuery;
+      void discardedBuilderOptions;
+      void discardedQueryType;
+
+      onChange({
+        ...baseQuery,
+        pluginVersion,
+        editorType: EditorType.SQL,
+        rawSql: generateSql(newOptions),
+        meta: {
+          ...baseQuery.meta,
+          builderOptions: newOptions,
+        },
+        format: mapQueryBuilderOptionsToGrafanaFormat(newOptions),
+      });
+    },
+    [onChange, query]
+  );
+
   if (query.editorType === EditorType.SQL) {
     return (
       <div data-testid="query-editor-section-sql">
@@ -166,6 +191,7 @@ const CHEditorByType = (props: CHQueryEditorProps) => {
       generatedSql={query.rawSql}
       app={app}
       onQueryChange={onQueryChange}
+      onEditAsSql={onEditAsSql}
     />
   );
 };

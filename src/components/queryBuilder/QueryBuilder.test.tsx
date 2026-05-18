@@ -1,8 +1,8 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { QueryBuilder } from './QueryBuilder';
+import { getCompactFilterColumns, QueryBuilder } from './QueryBuilder';
 import { Datasource } from 'data/CHDatasource';
-import { BuilderMode, QueryType, TimeUnit } from 'types/queryBuilder';
+import { BuilderMode, ColumnHint, QueryType, TimeUnit } from 'types/queryBuilder';
 import { CoreApp } from '@grafana/data';
 
 jest.mock('./views/TableQueryBuilder', () => ({
@@ -51,6 +51,29 @@ describe('QueryBuilder', () => {
   mockDs.fetchColumns = jest.fn(() => {
     setState();
     return Promise.resolve([]);
+  });
+
+  it('omits compact time columns from filter column options', () => {
+    const filterColumns = getCompactFilterColumns(
+      [
+        { name: 'TimestampTime', type: 'DateTime', picklistValues: [] },
+        { name: 'Timestamp', type: 'DateTime64(9)', picklistValues: [] },
+        { name: 'Body', type: 'String', picklistValues: [] },
+        { name: 'ingested_at', type: 'DateTime', picklistValues: [] },
+      ],
+      {
+        database: 'otel_v2',
+        table: 'otel_logs',
+        queryType: QueryType.Logs,
+        columns: [
+          { name: 'TimestampTime', hint: ColumnHint.FilterTime },
+          { name: 'Timestamp', hint: ColumnHint.Time },
+          { name: 'Body', hint: ColumnHint.LogMessage },
+        ],
+      }
+    );
+
+    expect(filterColumns.map((column) => column.name)).toEqual(['Body', 'ingested_at']);
   });
 
   it('renders correctly', async () => {
@@ -183,6 +206,7 @@ describe('QueryBuilder', () => {
     } as unknown as Datasource;
     const builderOptionsDispatch = jest.fn();
     const onQueryChange = jest.fn();
+    const onEditAsSql = jest.fn();
 
     render(
       <QueryBuilder
@@ -199,6 +223,7 @@ describe('QueryBuilder', () => {
         datasource={compactDs}
         generatedSql=""
         onQueryChange={onQueryChange}
+        onEditAsSql={onEditAsSql}
       />
     );
 
@@ -224,6 +249,14 @@ describe('QueryBuilder', () => {
     expect(onQueryChange).toHaveBeenCalledWith(
       expect.objectContaining({
         meta: expect.objectContaining({ logMessageLike: 'error' }),
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Edit as SQL' }));
+    expect(onEditAsSql).toHaveBeenCalledWith(
+      expect.objectContaining({
+        database: 'otel_v2',
+        table: 'otel_logs',
+        queryType: QueryType.Logs,
       })
     );
   });

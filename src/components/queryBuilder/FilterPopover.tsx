@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 import { AsyncSelect, Button, Select, useStyles2 } from '@grafana/ui';
 import { Datasource } from 'data/CHDatasource';
-import { Filter, FilterOperator, StringFilter, TableColumn } from 'types/queryBuilder';
+import { Filter, FilterOperator, NumberFilter, StringFilter, TableColumn } from 'types/queryBuilder';
 
 interface FilterPopoverProps {
   datasource: Datasource;
@@ -14,16 +14,51 @@ interface FilterPopoverProps {
   onClose: () => void;
 }
 
-const operatorOptions: Array<SelectableValue<FilterOperator>> = [
+type FilterValueKind = 'number' | 'string';
+
+const numberOperatorOptions: Array<SelectableValue<FilterOperator>> = [
+  { label: '>', value: FilterOperator.GreaterThan },
+  { label: '<', value: FilterOperator.LessThan },
+  { label: '>=', value: FilterOperator.GreaterThanOrEqual },
+  { label: '<=', value: FilterOperator.LessThanOrEqual },
   { label: '=', value: FilterOperator.Equals },
   { label: '!=', value: FilterOperator.NotEquals },
-  { label: 'LIKE', value: FilterOperator.Like },
-  { label: 'NOT LIKE', value: FilterOperator.NotLike },
   { label: 'IS NULL', value: FilterOperator.IsNull },
   { label: 'IS NOT NULL', value: FilterOperator.IsNotNull },
-  { label: 'IN', value: FilterOperator.In },
-  { label: 'NOT IN', value: FilterOperator.NotIn },
 ];
+
+const stringOperatorOptions: Array<SelectableValue<FilterOperator>> = [
+  { label: 'contains', value: FilterOperator.Like },
+  { label: 'does not contain', value: FilterOperator.NotLike },
+  { label: '=', value: FilterOperator.Equals },
+  { label: '!=', value: FilterOperator.NotEquals },
+  { label: 'IS NULL', value: FilterOperator.IsNull },
+  { label: 'IS NOT NULL', value: FilterOperator.IsNotNull },
+];
+
+const defaultOperatorByKind: Record<FilterValueKind, FilterOperator> = {
+  number: FilterOperator.GreaterThan,
+  string: FilterOperator.Like,
+};
+
+const getMapValueType = (type: string): string => {
+  return type.match(/Map\(\s*.+\s*,\s*(.+)\s*\)/)?.[1]?.trim() || type;
+};
+
+export const getFilterValueKind = (type = ''): FilterValueKind => {
+  const normalizedType = getMapValueType(type)
+    .toLowerCase()
+    .replace(/\(/g, '')
+    .replace(/\)/g, '')
+    .replace(/nullable/g, '')
+    .replace(/lowcardinality/g, '');
+
+  return ['int', 'float', 'decimal'].some((numberType) => normalizedType.includes(numberType)) ? 'number' : 'string';
+};
+
+export const getOperatorOptions = (kind: FilterValueKind): Array<SelectableValue<FilterOperator>> => {
+  return kind === 'number' ? numberOperatorOptions : stringOperatorOptions;
+};
 
 const getStyles = (theme: GrafanaTheme2) => ({
   popover: css`
@@ -61,6 +96,8 @@ export const FilterPopover = (props: FilterPopoverProps) => {
 
   const selectedColDef = allColumns.find((column) => column.name === selectedColumn);
   const isMapColumn = selectedColDef?.type?.startsWith('Map(') || false;
+  const filterKind = getFilterValueKind(selectedColDef?.type);
+  const currentOperatorOptions = useMemo(() => getOperatorOptions(filterKind), [filterKind]);
 
   useEffect(() => {
     if (isMapColumn && selectedColumn && database && table) {
@@ -105,21 +142,35 @@ export const FilterPopover = (props: FilterPopoverProps) => {
   );
 
   const noValueNeeded = operator === FilterOperator.IsNull || operator === FilterOperator.IsNotNull;
+  const numericValue = Number(value);
+  const isNumberValueInvalid =
+    filterKind === 'number' && !noValueNeeded && (value.trim() === '' || isNaN(numericValue));
 
   const handleAdd = () => {
-    if (!selectedColumn) {
+    if (!selectedColumn || isNumberValueInvalid) {
       return;
     }
 
-    const filter: StringFilter = {
+    const commonFilter = {
       filterType: 'custom',
       key: selectedColumn,
       type: selectedColDef?.type || 'string',
       operator: operator as any,
-      value: noValueNeeded ? '' : value,
       condition: 'AND',
       ...(isMapColumn && selectedMapKey ? { mapKey: selectedMapKey } : {}),
     };
+
+    const filter: StringFilter | NumberFilter =
+      filterKind === 'number'
+        ? ({
+            ...commonFilter,
+            value: noValueNeeded ? 0 : numericValue,
+          } as NumberFilter)
+        : ({
+            ...commonFilter,
+            value: noValueNeeded ? '' : value,
+          } as StringFilter);
+
     onAddFilter(filter as Filter);
     onClose();
   };
@@ -132,8 +183,12 @@ export const FilterPopover = (props: FilterPopoverProps) => {
           options={columnOptions}
           value={selectedColumn}
           onChange={(option) => {
-            setSelectedColumn(option.value || '');
+            const nextColumn = option.value || '';
+            const nextColumnDef = allColumns.find((column) => column.name === nextColumn);
+            const nextKind = getFilterValueKind(nextColumnDef?.type);
+            setSelectedColumn(nextColumn);
             setSelectedMapKey('');
+            setOperator(defaultOperatorByKind[nextKind]);
             setValue('');
           }}
           width={24}
@@ -162,9 +217,9 @@ export const FilterPopover = (props: FilterPopoverProps) => {
       <div className={styles.field}>
         <span className={styles.fieldLabel}>Operator</span>
         <Select
-          options={operatorOptions}
+          options={currentOperatorOptions}
           value={operator}
-          onChange={(option) => setOperator(option.value || FilterOperator.Equals)}
+          onChange={(option) => setOperator(option.value || defaultOperatorByKind[filterKind])}
           width={14}
           menuPlacement="bottom"
         />
@@ -189,7 +244,7 @@ export const FilterPopover = (props: FilterPopoverProps) => {
       )}
 
       <div className={styles.actions}>
-        <Button size="sm" onClick={handleAdd} disabled={!selectedColumn}>
+        <Button size="sm" onClick={handleAdd} disabled={!selectedColumn || isNumberValueInvalid}>
           Add
         </Button>
         <Button size="sm" variant="secondary" onClick={onClose}>
